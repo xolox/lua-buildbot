@@ -3,7 +3,7 @@
  A build bot for popular Lua projects.
 
  Author: Peter Odding <peter@peterodding.com>
- Last Change: September 11, 2011
+ Last Change: September 12, 2011
  Homepage: http://peterodding.com/code/lua/buildbot
  License: MIT
 
@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.2.1'
+local version = '0.2.2'
 
 -- You may have to change this.
 local sdk_setenv_tool = [[C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.Cmd]]
@@ -190,14 +190,19 @@ local function version_sort(strings, strip_extensions) -- {{{2
 end
 
 local function run_build(project, directory, command) -- {{{2
-  local batchfile = apr.filepath_merge(root, 'build-' .. project .. '.cmd')
-  assert(apr.filepath_set(directory))
-  write_file(batchfile, string.format([[
-CALL "%s" /release /x86
-%s
-]], sdk_setenv_tool, command))
-  assert(os.execute(batchfile) == 0)
-  os.remove(batchfile)
+  message("Building %s ..", project)
+  local batch_commands = string.format('CALL "%s" /x86 /release\nCD %s\n%s',
+      sdk_setenv_tool, directory, command)
+  local batch_file = os.tmpname() .. '.cmd'
+  write_file(batch_file, batch_commands, false)
+  local shell = assert(apr.proc_create 'cmd')
+  assert(shell:cmdtype_set 'program/env/path')
+  assert(shell:dir_set(directory))
+  assert(shell:exec { '/c', batch_file })
+  return function()
+    assert(shell:wait(true))
+    os.remove(batch_file)
+  end
 end
 
 -- Build instructions for specific projects. {{{1
@@ -230,8 +235,11 @@ end
 
 local function build_lua(builddir) -- {{{3
   local release = apr.filepath_name(builddir)
-  run_build(release, builddir, [[CALL etc\luavs.bat]])
-  copy_lua_files(builddir, release, 'lua')
+  local wait_for_build = run_build(release, builddir, [[CALL etc\luavs.bat]])
+  return function()
+    wait_for_build()
+    copy_lua_files(builddir, release, 'lua')
+  end
 end
 
 -- LuaJIT 1 & 2 from http://luajit.org. {{{2
@@ -257,30 +265,36 @@ end
 
 local function build_luajit1(builddir) -- {{{3
   local release = apr.filepath_name(builddir)
-  run_build(release, builddir, 'etc\\luavs.bat')
-  copy_lua_files(builddir, release, 'luajit1')
+  local wait_for_build = run_build(release, builddir, 'etc\\luavs.bat')
+  return function()
+    wait_for_build()
+    copy_lua_files(builddir, release, 'luajit1')
+  end
 end
 
 local function build_luajit2(builddir) -- {{{3
   local release = apr.filepath_name(builddir)
-  run_build(release, apr.filepath_merge(builddir, 'src'), 'msvcbuild.bat')
-  copy_lua_files(builddir, release, 'luajit2')
+  local wait_for_build = run_build(release, apr.filepath_merge(builddir, 'src'), 'msvcbuild.bat')
+  return function()
+    wait_for_build()
+    copy_lua_files(builddir, release, 'luajit2')
+  end
+end
+
+local function clean()
+  apr.dir_remove_recursive(builds)
+  apr.dir_remove_recursive(binaries)
+  apr.dir_make(archives)
+  apr.dir_make(builds)
+  apr.dir_make(binaries)
 end
 
 local function main() -- {{{1
 
-  -- Create the top level directories.
-  apr.dir_make(archives)
-  apr.dir_make(binaries)
-  apr.dir_make(builds)
-
   if apr.platform_get() == 'UNIX' then
 
     -- Start from a clean slate.
-    assert(apr.dir_remove_recursive(builds))
-    assert(apr.dir_make(builds))
-    assert(apr.dir_remove_recursive(binaries))
-    assert(apr.dir_make(binaries))
+    clean()
 
     -- Run build bot in dedicated, headless Windows XP virtual machine.
     write_file(buildlog, '', false)
@@ -349,15 +363,20 @@ local function main() -- {{{1
   elseif apr.platform_get() == 'WIN32' then
 
     -- We're inside the virtual machine! (this script is started automatically after boot)
+    clean()
+    local children = {}
 
     -- Build the most recent release of the Lua reference implementation.
     lua_latest = find_lua_release()
-    build_lua(download_archive(lua_latest))
+    table.insert(children, build_lua(download_archive(lua_latest)))
 
     -- Build the most recent releases of LuaJIT 1 and 2.
     lj1_latest, lj2_latest = find_luajit_releases()
-    build_luajit1(download_archive(lj1_latest))
-    build_luajit2(download_archive(lj2_latest))
+    table.insert(children, build_luajit1(download_archive(lj1_latest)))
+    table.insert(children, build_luajit2(download_archive(lj2_latest)))
+
+    -- Wait for all builds to finish.
+    for i = 1, #children do children[i]() end
 
     -- Shutdown the Windows virtual machine after building all packages (only
     -- when the build bot was started automatically). This returns control back
