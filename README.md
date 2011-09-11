@@ -33,12 +33,14 @@ As I mentioned above the plan is to run the build bot from a cron job on a serve
 
 ## Status
 
-The following has not yet been implemented:
+The following stuff has not yet been implemented but is on the to-do list:
 
- * Deploy the build bot and virtual machine to one of my servers and run the build bot from a daily cron job?
- * Support for popular / easy to build Lua modules such as [LuaSocket](http://w3.impa.br/~diego/software/luasocket/) and [LPeg](http://www.inf.puc-rio.br/~roberto/lpeg/)
+ * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
+ * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
+ * Support for popular / easy to build Lua modules such as **[LuaSocket](http://w3.impa.br/~diego/software/luasocket/)** and **[LPeg](http://www.inf.puc-rio.br/~roberto/lpeg/)**
+ * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
 
-## Dependencies
+## Dependencies in the VM
 
 In order to run the build bot on Windows I installed the following software in the virtual machine:
 
@@ -47,6 +49,11 @@ In order to run the build bot on Windows I installed the following software in t
  * [Lua For Windows](http://code.google.com/p/luaforwindows/) (v5.1.4-45)
  * My [Lua/APR binding](http://peterodding.com/code/lua/apr) (0.20)
  * `unzip.exe`, `gunzip.exe` and `tar.exe` from [UnxUtils](http://unxutils.sourceforge.net/)
+
+I'm not publishing the virtual machine image because it was registered with my serial number and of course it's quite big (more than 2 GB). However it's not hard to create the virtual machine, it just takes a bit of time. Apart from installing the software mentioned above, there are only two things to configure in the virtual machine:
+
+ * Inside the virtual machine I've mounted a shared folder as a network drive, this enables the two build bots to easily exchange files
+ * After creating the network drive I added `buildbot.cmd` to my Start → Programs → Startup menu so that the build bot runs automatically after the VM is started and shuts down the VM after building all projects
 
 ## Contact
 
