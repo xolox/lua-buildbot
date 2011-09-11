@@ -35,8 +35,7 @@ As I mentioned above the plan is to run the build bot from a cron job on a serve
 
 The following has not yet been implemented:
 
- * Deploy the virtual machine to one of my servers and run the build bot from a daily cron job?
- * Package and upload the files to be released to my homepage?
+ * Deploy the build bot and virtual machine to one of my servers and run the build bot from a daily cron job?
 
 ## Dependencies
 

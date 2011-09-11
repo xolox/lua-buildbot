@@ -21,10 +21,11 @@
 
 ]]
 
-local version = '0.1'
+local version = '0.2'
 
 -- You may have to change this.
 local sdk_setenv_tool = [[C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.Cmd]]
+local scp_target = 'vps:/home/peterodding.com/public/files/code/lua/buildbot/downloads'
 
 -- Load the Lua/APR binding.
 local apr = require 'apr'
@@ -324,6 +325,18 @@ local function main() -- {{{1
         end
       end
     end
+
+    if success then
+      for directory in apr.dir_open(binaries):entries('path') do
+        local archive = apr.filepath_name(directory) .. '.zip'
+        print("Generating " .. archive .. " ..")
+        assert(apr.filepath_set(directory))
+        assert(os.execute(string.format('zip -r ../%s .', archive)) == 0)
+        print("Uploading " .. archive .. " ..")
+        assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
+      end
+    end
+
     os.exit(success and 0 or 1)
 
   elseif apr.platform_get() == 'WIN32' then
