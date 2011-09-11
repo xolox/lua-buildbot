@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.2'
+local version = '0.2.1'
 
 -- You may have to change this.
 local sdk_setenv_tool = [[C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.Cmd]]
@@ -37,8 +37,13 @@ local root = apr.filepath_parent(apr.filepath_merge('.', arg[0], 'true-name'))
 local archives = apr.filepath_merge(root, 'archives')
 local binaries = apr.filepath_merge(root, 'binaries')
 local builds = apr.filepath_merge(root, 'builds')
+local buildlog = apr.filepath_merge(root, 'buildbot.log')
 
 -- Generic build bot functionality. {{{1
+
+local function message(fmt, ...)
+  io.stderr:write(fmt:format(...), '\n')
+end
 
 local function download(url) -- {{{2
   local components = assert(apr.uri_parse(url))
@@ -80,12 +85,12 @@ local function unpack_archive(archive) -- {{{2
       :gsub('%.tar$', '')
       :gsub('%.zip$', '')
   local builddir = apr.filepath_merge(builds, apr.filepath_name(basename))
-  print("Unpacking " .. archive .. " to " .. builddir)
+  message("Unpacking %s to %s", archive, builddir)
 
   -- The tar.exe included in my UnxUtils installation doesn't seem to support
   -- gzip compressed archives, so we uncompress archives manually.
   if archive:find '%.gz$' then
-    print("Uncompressing ", archive)
+    message("Uncompressing %s", archive)
     local backup = archive .. '.tmp'
     apr.file_copy(archive, backup)
     os.execute('gunzip -f ' .. archive)
@@ -95,12 +100,12 @@ local function unpack_archive(archive) -- {{{2
 
   if archive:find '%.zip$' then
     -- Unpack ZIP archives using the unzip command included in UnxUtils.
-    print("Unpacking ZIP archive " .. archive)
+    message("Unpacking ZIP archive %s", archive)
     apr.filepath_set(builds)
     assert(os.execute('unzip -qo ' .. archive) == 0)
   elseif archive:find '%.tar$' then
     -- Unpack TAR archives using the tar command included in UnxUtils.
-    print("Unpacking TAR archive " .. archive)
+    message("Unpacking TAR archive %s", archive)
     apr.filepath_set(builds)
     assert(os.execute('tar xf ' .. archive) == 0)
   else
@@ -115,7 +120,7 @@ local function download_archive(url) -- {{{2
   local name = apr.filepath_name(url)
   local path = apr.filepath_merge(archives, name)
   if apr.stat(path, 'type') ~= 'file' then
-    print("Downloading " .. url .. " to " .. path)
+    message("Downloading %s to %s", url, path)
     write_file(path, download(url), true)
   end
   return unpack_archive(path)
@@ -128,7 +133,7 @@ local function copy_binary(oldfile, newfile) -- {{{2
     assert(apr.dir_make_recursive(directory))
   end
   -- Copy file.
-  print("Copying .. " .. oldfile .. " -> " .. newfile)
+  message("Copying %s -> %s", oldfile, newfile)
   assert(apr.file_copy(oldfile, newfile))
 end
 
@@ -277,7 +282,9 @@ local function main() -- {{{1
     assert(apr.dir_remove_recursive(binaries))
     assert(apr.dir_make(binaries))
 
-    -- Use VirtualBox to run this build bot in a dedicated, headless Windows XP virtual machine.
+    -- Run build bot in dedicated, headless Windows XP virtual machine.
+    write_file(buildlog, '', false)
+    os.execute('tail -fn0 ' .. buildlog .. ' &')
     assert(os.execute "VBoxHeadless -startvm 'Lua build bot'" == 0)
 
     -- Check that the expected files were created.
@@ -320,7 +327,7 @@ local function main() -- {{{1
       for _, filename in ipairs(project[2]) do
         local pathname = apr.filepath_merge(binaries, filename)
         if apr.stat(pathname, 'type') ~= 'file' then
-          print("Missing expected file: " .. pathname)
+          message("Missing expected file: %s", pathname)
           success = false
         end
       end
@@ -329,10 +336,10 @@ local function main() -- {{{1
     if success then
       for directory in apr.dir_open(binaries):entries('path') do
         local archive = apr.filepath_name(directory) .. '.zip'
-        print("Generating " .. archive .. " ..")
+        message("Generating %s ..", archive)
         assert(apr.filepath_set(directory))
         assert(os.execute(string.format('zip -r ../%s .', archive)) == 0)
-        print("Uploading " .. archive .. " ..")
+        message("Uploading %s ..", archive)
         assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
       end
     end
