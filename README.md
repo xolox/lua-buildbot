@@ -36,6 +36,7 @@ As I mentioned above the plan is to run the build bot from a cron job on a serve
 The following has not yet been implemented:
 
  * Deploy the build bot and virtual machine to one of my servers and run the build bot from a daily cron job?
+ * Support for popular / easy to build Lua modules such as [LuaSocket](http://w3.impa.br/~diego/software/luasocket/) and [LPeg](http://www.inf.puc-rio.br/~roberto/lpeg/)
 
 ## Dependencies
 
