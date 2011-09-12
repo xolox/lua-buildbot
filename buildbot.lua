@@ -21,10 +21,8 @@
 
 ]]
 
-local version = '0.2.2'
+local version = '0.2.3'
 
--- You may have to change this.
-local sdk_setenv_tool = [[C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.Cmd]]
 local scp_target = 'vps:/home/peterodding.com/public/files/code/lua/buildbot/downloads'
 
 -- Load the Lua/APR binding.
@@ -188,6 +186,21 @@ local function version_sort(strings, strip_extensions) -- {{{2
   end)
   return strings
 end
+
+local function find_sdk_helper(root)
+  local command = [[REG QUERY "%s\SOFTWARE\Microsoft\Microsoft SDKs\Windows" /v CurrentInstallFolder]]
+  local pipe = io.popen(command:format(root))
+  local install_folder
+  for line in pipe:lines() do
+    install_folder = line:match '^%s*CurrentInstallFolder%s+REG_SZ%s+(.+)%s*$'
+    if install_folder then break end
+  end
+  pipe:close()
+  return install_folder
+end
+
+local windows_sdk_folder = assert(find_sdk_helper 'HKCU' or find_sdk_helper 'HKLM', "Failed to locate Windows SDK")
+local sdk_setenv_tool = apr.filepath_merge(windows_sdk_folder, [[Bin\SetEnv.Cmd]], 'true-name', 'native')
 
 local function run_build(project, directory, command) -- {{{2
   message("Building %s ..", project)
