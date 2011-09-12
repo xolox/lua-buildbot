@@ -21,8 +21,12 @@
 
 ]]
 
-local version = '0.2.3'
+local version = '0.2.4'
 
+-- When I run the build bot it automatically uploads generated binaries to my
+-- website. This will obviously not work for anyone else, so if you leave the
+-- variable undefined / set it to nil the build bot will just skip the step
+-- that uploads generated binaries without complaining.
 local scp_target = 'vps:/home/peterodding.com/public/files/code/lua/buildbot/downloads'
 
 -- Load the Lua/APR binding.
@@ -367,7 +371,9 @@ local function main() -- {{{1
         assert(apr.filepath_set(directory))
         assert(os.execute(string.format('zip -r ../%s .', archive)) == 0)
         message("Uploading %s ..", archive)
-        assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
+        if scp_target then
+          assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
+        end
       end
     end
 
