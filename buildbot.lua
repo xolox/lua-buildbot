@@ -3,7 +3,7 @@
  A build bot for popular Lua projects.
 
  Author: Peter Odding <peter@peterodding.com>
- Last Change: September 12, 2011
+ Last Change: September 18, 2011
  Homepage: http://peterodding.com/code/lua/buildbot
  License: MIT
 
@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.2.4'
+local version = '0.3'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -41,10 +41,30 @@ local binaries = apr.filepath_merge(root, 'binaries')
 local builds = apr.filepath_merge(root, 'builds')
 local buildlog = apr.filepath_merge(root, 'buildbot.log')
 
+-- Forward declaration for location of Windows SDK.
+local windows_sdk_folder, sdk_setenv_tool
+
 -- Generic build bot functionality. {{{1
 
 local function message(fmt, ...)
   io.stderr:write(fmt:format(...), '\n')
+end
+
+local function write_file(path, data, binary) -- {{{2
+  local handle = assert(io.open(path, binary and 'wb' or 'w'))
+  assert(handle:write(data))
+  assert(handle:close())
+end
+
+local function absolute_url(url, defaults) -- {{{2
+  url = assert(apr.uri_parse(url))
+  defaults = assert(apr.uri_parse(defaults))
+  for key, value in pairs(defaults) do
+    if not url[key] then
+      url[key] = value
+    end
+  end
+  return apr.uri_unparse(url)
 end
 
 local function download(url) -- {{{2
@@ -73,24 +93,34 @@ local function download(url) -- {{{2
   if statuscode ~= '200' then error(reason) end
 end
 
-local function write_file(path, data, binary) -- {{{2
-  local handle = assert(io.open(path, binary and 'wb' or 'w'))
-  assert(handle:write(data))
-  assert(handle:close())
+local function stripext(filename) -- {{{2
+  return filename
+    :gsub('%.gz$', '')
+    :gsub('%.tar$', '')
+    :gsub('%.tgz$', '')
+    :gsub('%.zip$', '')
+end
+
+local function filepaths(url) -- {{{2
+  local filename = apr.filepath_name(url)
+  local basename = stripext(filename)
+  return {
+    archive = apr.filepath_merge(archives, filename);
+    binaries = apr.filepath_merge(binaries, basename);
+    build = apr.filepath_merge(builds, basename);
+  }
 end
 
 local function unpack_archive(archive) -- {{{2
 
   -- Get the base name of the source code archive.
-  local basename = archive
-      :gsub('%.gz$', '')
-      :gsub('%.tar$', '')
-      :gsub('%.zip$', '')
-  local builddir = apr.filepath_merge(builds, apr.filepath_name(basename))
+  local paths = filepaths(archive)
+  local builddir = paths.build
   message("Unpacking %s to %s", archive, builddir)
 
   -- The tar.exe included in my UnxUtils installation doesn't seem to support
   -- gzip compressed archives, so we uncompress archives manually.
+  local delete_uncompressed
   if archive:find '%.gz$' then
     message("Uncompressing %s", archive)
     local backup = archive .. '.tmp'
@@ -98,6 +128,7 @@ local function unpack_archive(archive) -- {{{2
     os.execute('gunzip -f ' .. archive)
     apr.file_rename(backup, archive)
     archive = archive:gsub('%.gz$', '')
+    delete_uncompressed = archive
   end
 
   if archive:find '%.zip$' then
@@ -114,29 +145,21 @@ local function unpack_archive(archive) -- {{{2
     error("Unsupported archive type!")
   end
 
+  if delete_uncompressed then
+    os.remove(delete_uncompressed)
+  end
+
   return builddir
 
 end
 
 local function download_archive(url) -- {{{2
-  local name = apr.filepath_name(url)
-  local path = apr.filepath_merge(archives, name)
-  if apr.stat(path, 'type') ~= 'file' then
-    message("Downloading %s to %s", url, path)
-    write_file(path, download(url), true)
+  local paths = filepaths(url)
+  if apr.stat(paths.archive, 'type') ~= 'file' then
+    message("Downloading %s to %s", url, paths.archive)
+    write_file(paths.archive, download(url), true)
   end
-  return unpack_archive(path)
-end
-
-local function copy_binary(oldfile, newfile) -- {{{2
-  -- Automatically create target directory.
-  local directory = apr.filepath_parent(newfile)
-  if apr.stat(directory, 'type') ~= 'directory' then
-    assert(apr.dir_make_recursive(directory))
-  end
-  -- Copy file.
-  message("Copying %s -> %s", oldfile, newfile)
-  assert(apr.file_copy(oldfile, newfile))
+  return unpack_archive(paths.archive)
 end
 
 local function string_gsplit(string, pattern, capture) -- {{{2
@@ -162,18 +185,15 @@ local function string_gsplit(string, pattern, capture) -- {{{2
 end
 
 local function version_sort(strings, strip_extensions) -- {{{2
-  local function tokenize(s)
-    local parts = {}
+  local function tokenize(str)
+    local tokens = {}
     if strip_extensions then
-      s = s:gsub('%.gz$', '')
-      s = s:gsub('%.tar$', '')
-      s = s:gsub('%.tgz$', '')
-      s = s:gsub('%.zip$', '')
+      str = stripext(str)
     end
-    for p in string_gsplit(s, '%d+', true) do
-      table.insert(parts, tonumber(p) or p)
+    for token in string_gsplit(str, '%d+', true) do
+      table.insert(tokens, tonumber(token) or token)
     end
-    return parts
+    return tokens
   end
   table.sort(strings, function(left, right)
     local left_tokens = tokenize(left)
@@ -192,7 +212,7 @@ local function version_sort(strings, strip_extensions) -- {{{2
 end
 
 local function find_sdk_helper(root)
-  local command = [[REG QUERY "%s\SOFTWARE\Microsoft\Microsoft SDKs\Windows" /v CurrentInstallFolder]]
+  local command = [[REG QUERY "%s\SOFTWARE\Microsoft\Microsoft SDKs\Windows" /v CurrentInstallFolder 2>NUL]]
   local pipe = io.popen(command:format(root))
   local install_folder
   for line in pipe:lines() do
@@ -202,9 +222,6 @@ local function find_sdk_helper(root)
   pipe:close()
   return install_folder
 end
-
-local windows_sdk_folder = assert(find_sdk_helper 'HKCU' or find_sdk_helper 'HKLM', "Failed to locate Windows SDK")
-local sdk_setenv_tool = apr.filepath_merge(windows_sdk_folder, [[Bin\SetEnv.Cmd]], 'true-name', 'native')
 
 local function run_build(project, directory, command) -- {{{2
   message("Building %s ..", project)
@@ -224,18 +241,78 @@ end
 
 -- Build instructions for specific projects. {{{1
 
-local function copy_lua_files(builddir, release, variant) -- {{{2
-  local files = {
-    'src/lauxlib.h', 'src/lua.h', 'src/lua51.dll',
-    'src/lua51.lib', 'src/luaconf.h', 'src/lualib.h',
-    variant:find 'luajit' and 'src/luajit.exe' or 'src/lua.exe',
-    variant:find 'luajit2' and 'src/lua.hpp' or 'etc/lua.hpp',
-    (not variant:find 'luajit') and 'src/luac.exe' or nil,
-  }
-  for _, filename in ipairs(files) do
-    local basename = apr.filepath_name(filename)
-    copy_binary(apr.filepath_merge(builddir, filename), apr.filepath_merge(binaries, release .. '/' .. basename))
+local function auto_create_dir(path, parent)
+  if parent then
+    path = apr.filepath_parent(path)
   end
+  if apr.stat(path, 'type') ~= 'directory' then
+    assert(apr.dir_make_recursive(path))
+  end
+end
+
+local function copy_recursive(source, target)
+  for type, entry in apr.dir_open(source):entries('type', 'name') do
+    local source_entry = apr.filepath_merge(source, entry)
+    local target_entry = apr.filepath_merge(target, entry)
+    if type == 'directory' then
+      copy_recursive(source_entry, target_entry)
+    elseif type == 'file' then
+      auto_create_dir(target_entry, true)
+      message("Copying %s -> %s", source_entry, target_entry)
+      assert(apr.file_copy(source_entry, target_entry))
+    end
+  end
+end
+
+local function copy_files(sourcedir, targetdir, files)
+  for line in files:gmatch '[^\n]+' do
+    local source, target = line:match '^(.-)%->(.-)$'
+    if not (source and target) then
+      source = line:match '^%s*(.-)%s*$'
+      target = source
+    end
+    if source ~= '' and target ~= '' then
+      source = apr.filepath_merge(sourcedir, source:match '^%s*(.-)%s*$')
+      target = apr.filepath_merge(targetdir, target:match '^%s*(.-)%s*$')
+      local kind = apr.stat(source, 'type')
+      if kind then
+        if kind == 'directory' then
+          copy_recursive(source, target)
+        elseif kind == 'file' then
+          auto_create_dir(target, true)
+          message("Copying %s -> %s", source, target)
+          assert(apr.file_copy(source, target))
+        end
+      end
+    end
+  end
+end
+
+local function copy_lua_files(builddir) -- {{{2
+  local paths = filepaths(builddir)
+  copy_files(paths.build, paths.binaries, [[
+    COPYRIGHT -> COPYRIGHT.txt
+    HISTORY -> HISTORY.txt
+    INSTALL -> INSTALL.txt
+    README -> README.txt
+    doc/
+    etc/lua.hpp
+    etc/lua.ico
+    etc/luajit.ico
+    etc/strict.lua
+    jitdoc/
+    src/lauxlib.h
+    src/lua.exe -> lua.exe
+    src/lua.h
+    src/lua.hpp -> etc/lua.hpp
+    src/lua51.dll -> lua51.dll
+    src/lua51.lib
+    src/luac.exe -> luac.exe
+    src/luaconf.h
+    src/luajit.exe -> luajit.exe
+    src/lualib.h
+    test/
+  ]])
 end
 
 -- Lua reference implementation from http://lua.org. {{{2
@@ -255,7 +332,7 @@ local function build_lua(builddir) -- {{{3
   local wait_for_build = run_build(release, builddir, [[CALL etc\luavs.bat]])
   return function()
     wait_for_build()
-    copy_lua_files(builddir, release, 'lua')
+    copy_lua_files(builddir)
   end
 end
 
@@ -285,7 +362,7 @@ local function build_luajit1(builddir) -- {{{3
   local wait_for_build = run_build(release, builddir, 'etc\\luavs.bat')
   return function()
     wait_for_build()
-    copy_lua_files(builddir, release, 'luajit1')
+    copy_lua_files(builddir)
   end
 end
 
@@ -294,11 +371,48 @@ local function build_luajit2(builddir) -- {{{3
   local wait_for_build = run_build(release, apr.filepath_merge(builddir, 'src'), 'msvcbuild.bat')
   return function()
     wait_for_build()
-    copy_lua_files(builddir, release, 'luajit2')
+    copy_lua_files(builddir)
   end
 end
 
-local function clean()
+-- LPeg. {{{2
+
+local function find_lpeg_release()
+  local url = 'http://www.inf.puc-rio.br/~roberto/lpeg/'
+  local page = download(url)
+  for target in page:gmatch '<[Aa]%s+[Hh][Rr][Ee][Ff]="(.-)"' do
+    if target:find 'lpeg%-[0-9.]-%.tar%.gz$' then
+      -- TODO Right now the LPeg homepage only contains a link to the latest release, still this is kind of a hack...
+      return absolute_url(target, url)
+    end
+  end
+  error "Failed to find LPeg release online!"
+end
+
+local function build_lpeg(builddir, lua_paths)
+  local lpeg_paths = filepaths(builddir)
+  local release = apr.filepath_name(builddir)
+  -- Start the build using a custom command (LPeg doesn't come with a Windows makefile or batch script).
+  local command = 'CL.EXE /I"%s/src" lpeg.c /link /dll /out:lpeg.dll /export:luaopen_lpeg "/libpath:%s/src" lua51.lib'
+  local wait_for_build = run_build(release, builddir, command:format(lua_paths.binaries, lua_paths.binaries))
+  return function()
+    -- Wait for the build to finish and copy the resulting files.
+    wait_for_build()
+    copy_files(lpeg_paths.build, lpeg_paths.binaries, [[
+      HISTORY -> HISTORY.txt
+      lpeg-128.gif -> doc/lpeg-128.gif
+      lpeg.dll
+      lpeg.h -> src/lpeg.h
+      lpeg.html -> doc/lpeg.html
+      lpeg.lib -> src/lpeg.lib
+      re.html -> doc/re.html
+      re.lua
+      test.lua -> test/test.lua
+    ]])
+  end
+end
+
+local function clean() --- {{{1
   apr.dir_remove_recursive(builds)
   apr.dir_remove_recursive(binaries)
   apr.dir_make(archives)
@@ -321,35 +435,41 @@ local function main() -- {{{1
     -- Check that the expected files were created.
     local files = {
       { 'Lua 5.1.4', {
-        'lua-5.1.4/lauxlib.h',
+        'lua-5.1.4/etc/lua.hpp',
         'lua-5.1.4/lua.exe',
-        'lua-5.1.4/lua.h',
-        'lua-5.1.4/lua.hpp',
         'lua-5.1.4/lua51.dll',
-        'lua-5.1.4/lua51.lib',
         'lua-5.1.4/luac.exe',
-        'lua-5.1.4/luaconf.h',
-        'lua-5.1.4/lualib.h',
+        'lua-5.1.4/src/lauxlib.h',
+        'lua-5.1.4/src/lua.h',
+        'lua-5.1.4/src/lua51.lib',
+        'lua-5.1.4/src/luaconf.h',
+        'lua-5.1.4/src/lualib.h',
       }},
       { 'LuaJIT 1.1.7', {
-        'LuaJIT-1.1.7/lauxlib.h',
-        'LuaJIT-1.1.7/luajit.exe',
-        'LuaJIT-1.1.7/lua.h',
-        'LuaJIT-1.1.7/lua.hpp',
+        'LuaJIT-1.1.7/etc/lua.hpp',
         'LuaJIT-1.1.7/lua51.dll',
-        'LuaJIT-1.1.7/lua51.lib',
-        'LuaJIT-1.1.7/luaconf.h',
-        'LuaJIT-1.1.7/lualib.h',
+        'LuaJIT-1.1.7/luajit.exe',
+        'LuaJIT-1.1.7/src/lauxlib.h',
+        'LuaJIT-1.1.7/src/lua.h',
+        'LuaJIT-1.1.7/src/lua51.lib',
+        'LuaJIT-1.1.7/src/luaconf.h',
+        'LuaJIT-1.1.7/src/lualib.h',
       }},
       { 'LuaJIT 2.0.0-beta8', {
-        'LuaJIT-2.0.0-beta8/lauxlib.h',
-        'LuaJIT-2.0.0-beta8/luajit.exe',
-        'LuaJIT-2.0.0-beta8/lua.h',
-        'LuaJIT-2.0.0-beta8/lua.hpp',
+        'LuaJIT-2.0.0-beta8/etc/lua.hpp',
         'LuaJIT-2.0.0-beta8/lua51.dll',
-        'LuaJIT-2.0.0-beta8/lua51.lib',
-        'LuaJIT-2.0.0-beta8/luaconf.h',
-        'LuaJIT-2.0.0-beta8/lualib.h',
+        'LuaJIT-2.0.0-beta8/luajit.exe',
+        'LuaJIT-2.0.0-beta8/src/lauxlib.h',
+        'LuaJIT-2.0.0-beta8/src/lua.h',
+        'LuaJIT-2.0.0-beta8/src/lua51.lib',
+        'LuaJIT-2.0.0-beta8/src/luaconf.h',
+        'LuaJIT-2.0.0-beta8/src/lualib.h',
+      }},
+      { 'LPeg 0.10.2', {
+        'lpeg-0.10.2/lpeg.dll',
+        'lpeg-0.10.2/re.lua',
+        'lpeg-0.10.2/src/lpeg.h',
+        'lpeg-0.10.2/src/lpeg.lib',
       }},
     }
 
@@ -381,18 +501,29 @@ local function main() -- {{{1
 
   elseif apr.platform_get() == 'WIN32' then
 
+    windows_sdk_folder = assert(find_sdk_helper 'HKCU' or find_sdk_helper 'HKLM', "Failed to locate Windows SDK")
+    sdk_setenv_tool = apr.filepath_merge(windows_sdk_folder, [[Bin\SetEnv.Cmd]], 'true-name', 'native')
+
     -- We're inside the virtual machine! (this script is started automatically after boot)
     clean()
     local children = {}
 
     -- Build the most recent release of the Lua reference implementation.
-    lua_latest = find_lua_release()
-    table.insert(children, build_lua(download_archive(lua_latest)))
+    local lua_latest = find_lua_release()
+    local lua_builddir = download_archive(lua_latest)
+    local wait_for_lua = build_lua(lua_builddir)
 
     -- Build the most recent releases of LuaJIT 1 and 2.
-    lj1_latest, lj2_latest = find_luajit_releases()
+    local lj1_latest, lj2_latest = find_luajit_releases()
     table.insert(children, build_luajit1(download_archive(lj1_latest)))
     table.insert(children, build_luajit2(download_archive(lj2_latest)))
+
+    -- Build the most recent release of LPeg.
+    local lpeg_latest = find_lpeg_release()
+    local lpeg_builddir = download_archive(lpeg_latest)
+    -- To compile the LPeg DLL we need lua51.lib which is generated while building Lua.
+    wait_for_lua()
+    table.insert(children, build_lpeg(lpeg_builddir, filepaths(lua_latest)))
 
     -- Wait for all builds to finish.
     for i = 1, #children do children[i]() end

@@ -10,9 +10,10 @@ Lots of [Lua](http://lua.org/) projects (including Lua itself and [LuaJIT](http:
 
 The following packages have been built by the Lua build bot:
 
- * [Lua 5.1.4](http://peterodding.com/code/lua/buildbot/downloads/lua-5.1.4.zip) (135K)
- * [LuaJIT 1.1.7](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-1.1.7.zip) (113K)
- * [LuaJIT 2.0.0-beta8](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-2.0.0-beta8.zip) (194K)
+ * [Lua 5.1.4](http://peterodding.com/code/lua/buildbot/downloads/lua-5.1.4.zip) (234K)
+ * [LuaJIT 1.1.7](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-1.1.7.zip) (255K)
+ * [LuaJIT 2.0.0-beta8](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-2.0.0-beta8.zip) (269K)
+ * [LPeg 0.10.2](http://peterodding.com/code/lua/buildbot/downloads/lpeg-0.10.2.zip) (89K)
 
 ## How it works
 
@@ -37,7 +38,7 @@ The following stuff has not yet been implemented but is on the to-do list:
 
  * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
  * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
- * Support for popular / easy to build Lua modules such as **[LuaSocket](http://w3.impa.br/~diego/software/luasocket/)** and **[LPeg](http://www.inf.puc-rio.br/~roberto/lpeg/)**
+ * Support for popular / easy to build Lua modules such as **[LuaSocket](http://w3.impa.br/~diego/software/luasocket/)**
  * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
 
 ## Dependencies in the VM
