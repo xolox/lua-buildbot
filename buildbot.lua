@@ -3,7 +3,7 @@
  A build bot for popular Lua projects.
 
  Author: Peter Odding <peter@peterodding.com>
- Last Change: September 18, 2011
+ Last Change: October 15, 2011
  Homepage: http://peterodding.com/code/lua/buildbot
  License: MIT
 
@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3'
+local version = '0.3.1'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -119,7 +119,7 @@ local function unpack_archive(archive) -- {{{2
   message("Unpacking %s to %s", archive, builddir)
 
   -- The tar.exe included in my UnxUtils installation doesn't seem to support
-  -- gzip compressed archives, so we uncompress archives manually.
+  -- gzip compressed archives, so we uncompress those archives manually.
   local delete_uncompressed
   if archive:find '%.gz$' then
     message("Uncompressing %s", archive)
@@ -265,6 +265,8 @@ local function copy_recursive(source, target)
 end
 
 local function copy_files(sourcedir, targetdir, files)
+  -- This function got kind of complicated because it
+  -- supports renaming, optional files and recursive copying.
   for line in files:gmatch '[^\n]+' do
     local source, target = line:match '^(.-)%->(.-)$'
     if not (source and target) then
@@ -289,6 +291,7 @@ local function copy_files(sourcedir, targetdir, files)
 end
 
 local function copy_lua_files(builddir) -- {{{2
+  -- This handles Lua 5.1, LuaJIT 1 and LuaJIT 2.
   local paths = filepaths(builddir)
   copy_files(paths.build, paths.binaries, [[
     COPYRIGHT -> COPYRIGHT.txt
@@ -300,6 +303,8 @@ local function copy_lua_files(builddir) -- {{{2
     etc/lua.ico
     etc/luajit.ico
     etc/strict.lua
+    jit/
+    lib/ -> jit/
     jitdoc/
     src/lauxlib.h
     src/lua.exe -> lua.exe
