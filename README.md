@@ -14,6 +14,7 @@ The following packages have been built by the Lua build bot:
  * [LuaJIT 1.1.7](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-1.1.7.zip) (255K)
  * [LuaJIT 2.0.0-beta8](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-2.0.0-beta8.zip) (269K)
  * [LPeg 0.10.2](http://peterodding.com/code/lua/buildbot/downloads/lpeg-0.10.2.zip) (89K)
+ * [LuaSocket 2.0.2](http://peterodding.com/code/lua/buildbot/downloads/luasocket-2.0.2.zip) (126K)
 
 ## How it works
 

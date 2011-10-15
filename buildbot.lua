@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3.1'
+local version = '0.3.2'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -246,7 +246,8 @@ local function auto_create_dir(path, parent)
     path = apr.filepath_parent(path)
   end
   if apr.stat(path, 'type') ~= 'directory' then
-    assert(apr.dir_make_recursive(path))
+    apr.dir_make_recursive(path)
+    assert(apr.stat(path, 'type') == 'directory')
   end
 end
 
@@ -257,8 +258,8 @@ local function copy_recursive(source, target)
     if type == 'directory' then
       copy_recursive(source_entry, target_entry)
     elseif type == 'file' then
-      auto_create_dir(target_entry, true)
       message("Copying %s -> %s", source_entry, target_entry)
+      auto_create_dir(target_entry, true)
       assert(apr.file_copy(source_entry, target_entry))
     end
   end
@@ -398,7 +399,7 @@ local function build_lpeg(builddir, lua_paths)
   local lpeg_paths = filepaths(builddir)
   local release = apr.filepath_name(builddir)
   -- Start the build using a custom command (LPeg doesn't come with a Windows makefile or batch script).
-  local command = 'CL.EXE /I"%s/src" lpeg.c /link /dll /out:lpeg.dll /export:luaopen_lpeg "/libpath:%s/src" lua51.lib'
+  local command = 'CL.EXE /nologo /I"%s/src" lpeg.c /link /dll /out:lpeg.dll /export:luaopen_lpeg "/libpath:%s/src" lua51.lib'
   local wait_for_build = run_build(release, builddir, command:format(lua_paths.binaries, lua_paths.binaries))
   return function()
     -- Wait for the build to finish and copy the resulting files.
@@ -413,6 +414,69 @@ local function build_lpeg(builddir, lua_paths)
       re.html -> doc/re.html
       re.lua
       test.lua -> test/test.lua
+    ]])
+  end
+end
+
+-- LuaSocket. {{{2
+
+local function find_luasocket_release()
+  local url = 'http://files.luaforge.net/releases/luasocket/luasocket'
+  local page = download(url)
+  local releases = {}
+  for _, target in page:gmatch '<[Aa]%s+[Hh][Rr][Ee][Ff]=(["\'])(.-)%1' do
+    if target:find 'luasocket%-[0-9.]-$' then
+      table.insert(releases, absolute_url(target, url))
+    end
+  end
+  if #releases >= 1 then
+    local latest_release = table.remove(version_sort(releases, true))
+    local basename = apr.filepath_name(latest_release)
+    return latest_release .. '/' .. basename .. '.tar.gz'
+  else
+    error "Failed to find LuaSocket release online!"
+  end
+end
+
+local function build_luasocket(builddir, lua_paths)
+  -- TODO Building of LuaSocket not yet implemented because it seems to require
+  -- Visual Studio while I only have the Windows SDK installed in my VM.
+  local luasocket_paths = filepaths(builddir)
+  local release = apr.filepath_name(builddir)
+  -- Start the build using a custom batch script (the LuaSocket distribution
+  -- is build using Visual Studio which I don't have installed -- this will
+  -- have to do for now).
+  local command = [[
+    CL.EXE /nologo /MD /D"WIN32" /D"LUASOCKET_EXPORTS" ^
+      /D"LUASOCKET_API=__declspec(dllexport)" /D"LUASOCKET_DEBUG" ^
+      /I"%s/src" src/auxiliar.c src/buffer.c src/except.c src/inet.c src/io.c src/luasocket.c ^
+      src/options.c src/select.c src/tcp.c src/timeout.c src/udp.c src/wsocket.c ^
+      /link /dll /out:socket.dll "/libpath:%s/src" lua51.lib ws2_32.lib
+    IF EXIST socket.dll.manifest MT -nologo -manifest socket.dll.manifest -outputresource:socket.dll;2
+    CL.EXE /nologo /MD /D"WIN32" /I"%s/src" src/mime.c /link /dll /out:mime.dll "/libpath:%s/src" lua51.lib
+    IF EXIST mime.dll.manifest MT -nologo -manifest mime.dll.manifest -outputresource:mime.dll;2
+  ]]
+  local wait_for_build = run_build(release, builddir, command:format(lua_paths.binaries, lua_paths.binaries, lua_paths.binaries, lua_paths.binaries))
+  return function()
+    -- Wait for the build to finish and copy the resulting files.
+    wait_for_build()
+    copy_files(luasocket_paths.build, luasocket_paths.binaries, [[
+      README
+      LICENSE
+      doc
+      etc
+      samples
+      test
+      src/socket.lua
+      src/mime.lua
+      src/ltn12.lua
+      src/ftp.lua -> src/socket/ftp.lua
+      src/http.lua -> src/socket/http.lua
+      src/smtp.lua -> src/socket/smtp.lua
+      src/tp.lua -> src/socket/tp.lua
+      src/url.lua -> src/socket/url.lua
+      socket.dll -> src/socket/core.dll
+      mime.dll -> src/mime/core.dll
     ]])
   end
 end
@@ -454,6 +518,7 @@ local function main() -- {{{1
         'LuaJIT-1.1.7/etc/lua.hpp',
         'LuaJIT-1.1.7/lua51.dll',
         'LuaJIT-1.1.7/luajit.exe',
+        'LuaJIT-1.1.7/jit/opt.lua',
         'LuaJIT-1.1.7/src/lauxlib.h',
         'LuaJIT-1.1.7/src/lua.h',
         'LuaJIT-1.1.7/src/lua51.lib',
@@ -464,6 +529,7 @@ local function main() -- {{{1
         'LuaJIT-2.0.0-beta8/etc/lua.hpp',
         'LuaJIT-2.0.0-beta8/lua51.dll',
         'LuaJIT-2.0.0-beta8/luajit.exe',
+        'LuaJIT-2.0.0-beta8/jit/dis_x86.lua',
         'LuaJIT-2.0.0-beta8/src/lauxlib.h',
         'LuaJIT-2.0.0-beta8/src/lua.h',
         'LuaJIT-2.0.0-beta8/src/lua51.lib',
@@ -475,6 +541,12 @@ local function main() -- {{{1
         'lpeg-0.10.2/re.lua',
         'lpeg-0.10.2/src/lpeg.h',
         'lpeg-0.10.2/src/lpeg.lib',
+      }},
+      { 'LuaSocket 2.0.2', {
+        'luasocket-2.0.2/src/mime.lua',
+        'luasocket-2.0.2/src/mime/core.dll',
+        'luasocket-2.0.2/src/socket.lua',
+        'luasocket-2.0.2/src/socket/core.dll',
       }},
     }
 
@@ -529,6 +601,11 @@ local function main() -- {{{1
     -- To compile the LPeg DLL we need lua51.lib which is generated while building Lua.
     wait_for_lua()
     table.insert(children, build_lpeg(lpeg_builddir, filepaths(lua_latest)))
+
+    -- Build the most recent release of LuaSocket.
+    local luasocket_latest = find_luasocket_release()
+    local luasocket_builddir = download_archive(luasocket_latest)
+    table.insert(children, build_luasocket(luasocket_builddir, filepaths(lua_latest)))
 
     -- Wait for all builds to finish.
     for i = 1, #children do children[i]() end
