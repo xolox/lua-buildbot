@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3.4'
+local version = '0.3.5'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -196,11 +196,11 @@ local function unpack_archive(archive) -- {{{2
 
 end
 
-local function download_archive(url) -- {{{2
-  local paths = filepaths(url)
+local function download_archive(archive) -- {{{2
+  local paths = filepaths(archive.file)
   if apr.stat(paths.archive, 'type') ~= 'file' then
-    message("Downloading %s to %s", url, paths.archive)
-    write_file(paths.archive, download(url), true)
+    message("Downloading %s to %s", archive.url, paths.archive)
+    write_file(paths.archive, download(archive.url), true)
   end
   return unpack_archive(paths.archive)
 end
@@ -283,6 +283,10 @@ local function run_build(project, directory, command) -- {{{2
 end
 
 -- Build instructions for specific projects. {{{1
+
+local function archive_from_url(url, file)
+  return { url = url, file = (file or apr.filepath_name(url)):lower() }
+end
 
 local function auto_create_dir(path, parent)
   if parent then
@@ -373,7 +377,7 @@ local function find_lua_release() -- {{{3
     local url = 'http://www.lua.org/ftp/' .. archive
     table.insert(releases, url)
   end
-  return table.remove(version_sort(releases, true))
+  return archive_from_url(table.remove(version_sort(releases, true)))
 end
 
 local function build_lua(builddir) -- {{{3
@@ -403,7 +407,7 @@ local function find_luajit_releases() -- {{{3
   end
   local lj1_latest = table.remove(version_sort(lj1_releases, true))
   local lj2_latest = table.remove(version_sort(lj2_releases, true))
-  return lj1_latest, lj2_latest
+  return archive_from_url(lj1_latest), archive_from_url(lj2_latest)
 end
 
 local function build_luajit1(builddir) -- {{{3
@@ -432,7 +436,7 @@ local function find_lpeg_release()
   for target in page:gmatch '<[Aa]%s+[Hh][Rr][Ee][Ff]="(.-)"' do
     if target:find 'lpeg%-[0-9.]-%.tar%.gz$' then
       -- TODO Right now the LPeg homepage only contains a link to the latest release, still this is kind of a hack...
-      return absolute_url(target, url)
+      return archive_from_url(absolute_url(target, url))
     end
   end
   error "Failed to find LPeg release online!"
@@ -475,15 +479,13 @@ local function find_luasocket_release()
   if #releases >= 1 then
     local latest_release = table.remove(version_sort(releases, true))
     local basename = apr.filepath_name(latest_release)
-    return latest_release .. '/' .. basename .. '.tar.gz'
+    return archive_from_url(latest_release .. '/' .. basename .. '.tar.gz')
   else
     error "Failed to find LuaSocket release online!"
   end
 end
 
 local function build_luasocket(builddir, lua_paths)
-  -- TODO Building of LuaSocket not yet implemented because it seems to require
-  -- Visual Studio while I only have the Windows SDK installed in my VM.
   local luasocket_paths = filepaths(builddir)
   local release = apr.filepath_name(builddir)
   -- Start the build using a custom batch script (the LuaSocket distribution
@@ -629,26 +631,28 @@ local function main() -- {{{1
     local children = {}
 
     -- Build the most recent release of the Lua reference implementation.
-    local lua_latest = find_lua_release()
-    local lua_builddir = download_archive(lua_latest)
+    local lua_release = find_lua_release()
+    local lua_builddir = download_archive(lua_release)
     local wait_for_lua = build_lua(lua_builddir)
 
     -- Build the most recent releases of LuaJIT 1 and 2.
-    local lj1_latest, lj2_latest = find_luajit_releases()
-    table.insert(children, build_luajit1(download_archive(lj1_latest)))
-    table.insert(children, build_luajit2(download_archive(lj2_latest)))
+    local lj1_release, lj2_release = find_luajit_releases()
+    table.insert(children, build_luajit1(download_archive(lj1_release)))
+    table.insert(children, build_luajit2(download_archive(lj2_release)))
+
+    -- Lua modules need to be linked with lua51.dll using lua51.lib which isn't
+    -- available until the Lua build is finished, so we wait for it.
+    wait_for_lua()
 
     -- Build the most recent release of LPeg.
-    local lpeg_latest = find_lpeg_release()
-    local lpeg_builddir = download_archive(lpeg_latest)
-    -- To compile the LPeg DLL we need lua51.lib which is generated while building Lua.
-    wait_for_lua()
-    table.insert(children, build_lpeg(lpeg_builddir, filepaths(lua_latest)))
+    local lpeg_release = find_lpeg_release()
+    local lpeg_builddir = download_archive(lpeg_release)
+    table.insert(children, build_lpeg(lpeg_builddir, filepaths(lua_release.url)))
 
     -- Build the most recent release of LuaSocket.
-    local luasocket_latest = find_luasocket_release()
-    local luasocket_builddir = download_archive(luasocket_latest)
-    table.insert(children, build_luasocket(luasocket_builddir, filepaths(lua_latest)))
+    local luasocket_release = find_luasocket_release()
+    local luasocket_builddir = download_archive(luasocket_release)
+    table.insert(children, build_luasocket(luasocket_builddir, filepaths(lua_release.url)))
 
     -- Wait for all builds to finish.
     for i = 1, #children do children[i]() end
