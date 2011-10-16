@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3.3'
+local version = '0.3.4'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -122,12 +122,25 @@ local function filepaths(url) -- {{{2
   }
 end
 
+local function listdir(path)
+  local entries = {}
+  for name in apr.dir_open(path):entries 'name' do
+    table.insert(entries, name)
+  end
+  table.sort(entries)
+  return entries
+end
+
 local function unpack_archive(archive) -- {{{2
 
   -- Get the base name of the source code archive.
   local paths = filepaths(archive)
   local builddir = paths.build
   message("Unpacking %s to %s", archive, builddir)
+
+  -- Remember which files were in the top level build directory before we
+  -- unpacked the release archive, so that we know which files are new.
+  local entries_before = listdir(builds)
 
   -- The tar.exe included in my UnxUtils installation doesn't seem to support
   -- gzip compressed archives, so we uncompress those archives manually.
@@ -156,8 +169,27 @@ local function unpack_archive(archive) -- {{{2
     error("Unsupported archive type!")
   end
 
+  -- Cleanup previously uncompressed archives.
   if delete_uncompressed then
     os.remove(delete_uncompressed)
+  end
+
+  -- Find where the file(s) that we just unpacked were saved by looking for the
+  -- difference between the before/after directory listings and make sure the
+  -- files are where we expect them to be.
+  local entries_after = listdir(builds)
+  local num_differences = 0
+  local unpacked_directory
+  for i = 1, #entries_after do
+    if entries_before[i] ~= entries_after[i] then
+      unpacked_directory = table.remove(entries_after, i)
+      num_differences = num_differences + 1
+    end
+  end
+  assert(num_differences == 1)
+  if unpacked_directory ~= paths.release then
+    message("Renaming unpacked directory %s -> %s", unpacked_directory, paths.release)
+    assert(apr.file_rename(unpacked_directory, paths.release))
   end
 
   return builddir
