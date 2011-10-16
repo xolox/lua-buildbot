@@ -19,9 +19,14 @@
   - Unpack and build project
   - Copy files to be released (binaries & headers)
 
+ TODO Add a command line interface
+ TODO Decouple checking for updates from building, this way we can check for updates on UNIX and never even bother booting the VM?
+ TODO Include cryptographic hashes of generated binaries in README?
+ TODO Extract project specific instructions into separate files?
+
 ]]
 
-local version = '0.4'
+local version = '0.4.1'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -122,7 +127,17 @@ local function context_from_url(url, file)
     archive = apr.filepath_merge(archives, file),
     build = apr.filepath_merge(builds, basename),
     binaries = apr.filepath_merge(binaries, basename),
+    binary_archive = apr.filepath_merge(binaries, basename .. '.zip'),
   }
+end
+
+local function uptodate(context)
+  -- If the binary archive for the latest release of this
+  -- project already exists we don't generate it again.
+  if apr.stat(context.binary_archive, 'type') == 'file' then
+    message("Binaries for %s already up-to-date.", context.release)
+    return true
+  end
 end
 
 local function listdir(path)
@@ -578,20 +593,9 @@ local function build_luafilesystem(lfs_release, lua_release)
   end
 end
 
-local function clean() -- {{{1
-  apr.dir_remove_recursive(builds)
-  apr.dir_remove_recursive(binaries)
-  apr.dir_make(archives)
-  apr.dir_make(builds)
-  apr.dir_make(binaries)
-end
-
 local function main() -- {{{1
 
   if apr.platform_get() == 'UNIX' then
-
-    -- Start from a clean slate.
-    clean()
 
     -- Run build bot in dedicated, headless Windows XP virtual machine.
     write_file(buildlog, '', false)
@@ -601,6 +605,8 @@ local function main() -- {{{1
         "Failed to start VirtualBox! Is the VM already running?")
 
     -- Check that the expected files were created.
+    -- TODO Strip the top level directory information.
+    -- TODO Move these checks to the sections with project specific code.
     local files = {
       { 'Lua 5.1.4', {
         'lua-5.1.4/etc/lua.hpp',
@@ -661,14 +667,19 @@ local function main() -- {{{1
     end
 
     if success then
-      for directory in apr.dir_open(binaries):entries('path') do
-        local archive = apr.filepath_name(directory) .. '.zip'
-        message("Generating %s ..", archive)
-        assert(apr.filepath_set(directory))
-        assert(os.execute(string.format('zip -r ../%s .', archive)) == 0)
-        message("Uploading %s ..", archive)
-        if scp_target then
-          assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
+      for type, path in apr.dir_open(binaries):entries('type', 'path') do
+        if type == 'directory' then
+          -- TODO Use context.binary_archive?
+          local archive = path .. '.zip'
+          if apr.stat(archive, 'type') ~= 'file' then
+            message("Generating %s ..", archive)
+            assert(apr.filepath_set(directory))
+            assert(os.execute(string.format('zip -r ../%s .', archive)) == 0)
+            message("Uploading %s ..", archive)
+            if scp_target then
+              assert(os.execute(string.format('scp ../%s %s/%s', archive, scp_target, archive)))
+            end
+          end
         end
       end
     end
@@ -681,33 +692,43 @@ local function main() -- {{{1
     sdk_setenv_tool = apr.filepath_merge(windows_sdk_folder, [[Bin\SetEnv.Cmd]], 'true-name', 'native')
 
     -- We're inside the virtual machine! (this script is started automatically after boot)
-    clean()
     local children = {}
 
     -- Build the most recent release of the Lua reference implementation.
     local lua_release = find_lua_release()
-    local wait_for_lua = build_lua(download_archive(lua_release))
+    local wait_for_lua = uptodate(lua_release) and (function() end)
+        or build_lua(download_archive(lua_release))
 
     -- Build the most recent releases of LuaJIT 1 and 2.
     local lj1_release, lj2_release = find_luajit_releases()
-    table.insert(children, build_luajit1(download_archive(lj1_release)))
-    table.insert(children, build_luajit2(download_archive(lj2_release)))
+    if not uptodate(lj1_release) then
+      table.insert(children, build_luajit1(download_archive(lj1_release)))
+    end
+    if not uptodate(lj2_release) then
+      table.insert(children, build_luajit2(download_archive(lj2_release)))
+    end
 
-    -- Lua modules need to be linked with lua51.dll using lua51.lib which isn't
-    -- available until the Lua build is finished, so we wait for it.
+    -- Lua modules need to be linked with lua51.dll using lua51.lib which
+    -- isn't available until the Lua build is finished, so we wait for it.
     wait_for_lua()
 
     -- Build the most recent release of LPeg.
     local lpeg_release = find_lpeg_release()
-    table.insert(children, build_lpeg(download_archive(lpeg_release), lua_release))
+    if not uptodate(lpeg_release) then
+      table.insert(children, build_lpeg(download_archive(lpeg_release), lua_release))
+    end
 
     -- Build the most recent release of LuaSocket.
     local luasocket_release = find_luasocket_release()
-    table.insert(children, build_luasocket(download_archive(luasocket_release), lua_release))
+    if not uptodate(luasocket_release) then
+      table.insert(children, build_luasocket(download_archive(luasocket_release), lua_release))
+    end
 
     -- Build the most recent release of LuaFileSystem.
     local lfs_release = find_luafilesystem_release()
-    table.insert(children, build_luafilesystem(download_archive(lfs_release), lua_release))
+    if not uptodate(lfs_release) then
+      table.insert(children, build_luafilesystem(download_archive(lfs_release), lua_release))
+    end
 
     -- Wait for all builds to finish.
     for i = 1, #children do children[i]() end
