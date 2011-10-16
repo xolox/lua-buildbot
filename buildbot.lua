@@ -3,7 +3,7 @@
  A build bot for popular Lua projects.
 
  Author: Peter Odding <peter@peterodding.com>
- Last Change: October 15, 2011
+ Last Change: October 16, 2011
  Homepage: http://peterodding.com/code/lua/buildbot
  License: MIT
 
@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3.2'
+local version = '0.3.3'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -69,28 +69,39 @@ end
 
 local function download(url) -- {{{2
   local components = assert(apr.uri_parse(url))
-  assert(components.scheme == 'http', "invalid protocol!")
-  local port = assert(components.port or apr.uri_port_of_scheme(components.scheme))
-  local socket = assert(apr.socket_create())
-  assert(socket:connect(components.hostname, port))
-  local pathinfo = assert(apr.uri_unparse(components, 'pathinfo'))
-  assert(socket:write('GET ', pathinfo, ' HTTP/1.0\r\n',
-                      'Host: ', components.hostname, '\r\n',
-                      '\r\n'))
-  local statusline = assert(socket:read(), 'HTTP response missing status line!')
-  local _, statuscode, reason = assert(statusline:match '^(%S+)%s+(%S+)%s+(.-)$')
-  local redirect = statuscode:find '^30[123]$'
-  for line in socket:lines() do
-    local name, value = line:match '^(%S+):%s+(.-)\r?$'
-    if name and value then
-      if redirect and name:lower() == 'location' then
-        return download(value)
+  if components.scheme == 'http' then
+    -- Download over HTTP using a Lua module (in this case my Lua/APR binding).
+    local port = assert(components.port or apr.uri_port_of_scheme(components.scheme))
+    local socket = assert(apr.socket_create())
+    assert(socket:connect(components.hostname, port))
+    local pathinfo = assert(apr.uri_unparse(components, 'pathinfo'))
+    assert(socket:write('GET ', pathinfo, ' HTTP/1.0\r\n',
+                        'Host: ', components.hostname, '\r\n',
+                        '\r\n'))
+    local statusline = assert(socket:read(), 'HTTP response missing status line!')
+    local _, statuscode, reason = assert(statusline:match '^(%S+)%s+(%S+)%s+(.-)$')
+    local redirect = statuscode:find '^30[123]$'
+    for line in socket:lines() do
+      local name, value = line:match '^(%S+):%s+(.-)\r?$'
+      if name and value then
+        if redirect and name:lower() == 'location' then
+          return download(value)
+        end
+      else
+        return (assert(socket:read '*a', 'HTTP response missing body?!'))
       end
-    else
-      return (assert(socket:read '*a', 'HTTP response missing body?!'))
     end
+    if statuscode ~= '200' then error(reason) end
+  else
+    -- Download over HTTPS (SSL) using an external program (wget from UnxUtils).
+    local tempfile = os.tmpname()
+    assert(os.execute(string.format('wget -q "-O%s" "%s"', tempfile, url)) == 0, "Failed to download over HTTPS using wget!")
+    local handle = assert(io.open(tempfile, 'rb'), "Failed to open temporary file written by wget!")
+    local data = assert(handle:read('*a'), "Failed to read temporary file written by wget!")
+    assert(handle:close())
+    assert(os.remove(tempfile))
+    return data
   end
-  if statuscode ~= '200' then error(reason) end
 end
 
 local function stripext(filename) -- {{{2
