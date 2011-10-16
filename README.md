@@ -10,11 +10,27 @@ Lots of [Lua](http://lua.org/) projects (including Lua itself and [LuaJIT](http:
 
 The following packages have been built by the Lua build bot:
 
+### Implementations of Lua
+
  * [Lua 5.1.4](http://peterodding.com/code/lua/buildbot/downloads/lua-5.1.4.zip) (234K)
- * [LuaJIT 1.1.7](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-1.1.7.zip) (255K)
- * [LuaJIT 2.0.0-beta8](http://peterodding.com/code/lua/buildbot/downloads/LuaJIT-2.0.0-beta8.zip) (269K)
+ * [LuaJIT 1.1.7](http://peterodding.com/code/lua/buildbot/downloads/luajit-1.1.7.zip) (255K)
+ * [LuaJIT 2.0.0-beta8](http://peterodding.com/code/lua/buildbot/downloads/luajit-2.0.0-beta8.zip) (269K)
+
+### Lua modules
+
  * [LPeg 0.10.2](http://peterodding.com/code/lua/buildbot/downloads/lpeg-0.10.2.zip) (89K)
  * [LuaSocket 2.0.2](http://peterodding.com/code/lua/buildbot/downloads/luasocket-2.0.2.zip) (126K)
+ * [LuaFileSystem 1.5.0](http://peterodding.com/code/lua/buildbot/downloads/luafilesystem-1.5.0.zip) (70K)
+
+## Status
+
+The following stuff has not yet been implemented but is on the to-do list:
+
+ * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
+ * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
+ * **Use LuaRocks to build Lua modules**: currently the build bot uses custom batch scripts to build Lua modules, but of course a generic solution is preferable!
+    * While adding support for the LuaSocket module I was curious enough to try if `luarocks install luasocket` would work in my environment but it doesn't; `msbuild` complains that the project files are incompatible
+ * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
 
 ## How it works
 
@@ -33,15 +49,6 @@ Right now the build bot is meant to be run on my machine because it works in a v
 
 As I mentioned above the plan is to run the build bot from a cron job on a server, this is still a work in progress.
 
-## Status
-
-The following stuff has not yet been implemented but is on the to-do list:
-
- * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
- * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
- * Support for popular / easy to build Lua modules such as **[LuaSocket](http://w3.impa.br/~diego/software/luasocket/)**
- * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
-
 ## Dependencies in the VM
 
 In order to run the build bot on Windows I installed the following software in the virtual machine:
@@ -50,7 +57,7 @@ In order to run the build bot on Windows I installed the following software in t
  * The latest [Windows Platform SDK](http://www.microsoft.com/download/en/details.aspx?id=8279) (7.1)
  * [Lua For Windows](http://code.google.com/p/luaforwindows/) (v5.1.4-45)
  * My [Lua/APR binding](http://peterodding.com/code/lua/apr) (0.20)
- * `unzip.exe`, `gunzip.exe` and `tar.exe` from [UnxUtils](http://unxutils.sourceforge.net/)
+ * `gunzip`, `tar`, `wget` and `unzip` from [UnxUtils](http://unxutils.sourceforge.net/)
 
 I'm not publishing the virtual machine image because it was registered with my serial number and of course it's quite big (more than 2 GB). However it's not hard to create the virtual machine, it just takes a bit of time. Apart from installing the software mentioned above, there are only two things to configure in the virtual machine:
 

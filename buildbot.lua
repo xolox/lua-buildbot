@@ -21,7 +21,7 @@
 
 ]]
 
-local version = '0.3.5'
+local version = '0.4'
 
 -- When I run the build bot it automatically uploads generated binaries to my
 -- website. This will obviously not work for anyone else, so if you leave the
@@ -47,7 +47,8 @@ local windows_sdk_folder, sdk_setenv_tool
 -- Generic build bot functionality. {{{1
 
 local function message(fmt, ...)
-  io.stderr:write(fmt:format(...), '\n')
+  io.stdout:write(fmt:format(...), '\n')
+  io.stdout:flush()
 end
 
 local function write_file(path, data, binary) -- {{{2
@@ -112,13 +113,15 @@ local function stripext(filename) -- {{{2
     :gsub('%.zip$', '')
 end
 
-local function filepaths(url) -- {{{2
-  local filename = apr.filepath_name(url)
-  local basename = stripext(filename)
+local function context_from_url(url, file)
+  local file = apr.filepath_name(file or url):lower()
+  local basename = stripext(file)
   return {
-    archive = apr.filepath_merge(archives, filename);
-    binaries = apr.filepath_merge(binaries, basename);
-    build = apr.filepath_merge(builds, basename);
+    url = url,
+    release = basename,
+    archive = apr.filepath_merge(archives, file),
+    build = apr.filepath_merge(builds, basename),
+    binaries = apr.filepath_merge(binaries, basename),
   }
 end
 
@@ -131,12 +134,11 @@ local function listdir(path)
   return entries
 end
 
-local function unpack_archive(archive) -- {{{2
+local function unpack_archive(context) -- {{{2
 
   -- Get the base name of the source code archive.
-  local paths = filepaths(archive)
-  local builddir = paths.build
-  message("Unpacking %s to %s", archive, builddir)
+  local archive = context.archive
+  message("Unpacking %s to %s", archive, context.build)
 
   -- Remember which files were in the top level build directory before we
   -- unpacked the release archive, so that we know which files are new.
@@ -166,7 +168,7 @@ local function unpack_archive(archive) -- {{{2
     apr.filepath_set(builds)
     assert(os.execute('tar xf ' .. archive) == 0)
   else
-    error("Unsupported archive type!")
+    error "Unsupported archive type!"
   end
 
   -- Cleanup previously uncompressed archives.
@@ -187,22 +189,22 @@ local function unpack_archive(archive) -- {{{2
     end
   end
   assert(num_differences == 1)
-  if unpacked_directory ~= paths.release then
-    message("Renaming unpacked directory %s -> %s", unpacked_directory, paths.release)
-    assert(apr.file_rename(unpacked_directory, paths.release))
+  if unpacked_directory ~= context.release then
+    message("Renaming unpacked directory %s -> %s", unpacked_directory, context.release)
+    assert(apr.file_rename(unpacked_directory, context.release))
   end
-
-  return builddir
 
 end
 
-local function download_archive(archive) -- {{{2
-  local paths = filepaths(archive.file)
-  if apr.stat(paths.archive, 'type') ~= 'file' then
-    message("Downloading %s to %s", archive.url, paths.archive)
-    write_file(paths.archive, download(archive.url), true)
+local function download_archive(context) -- {{{2
+  if apr.stat(context.archive, 'type') == 'file' then
+    message("The archive %s was previously downloaded", context.archive)
+  else
+    message("Downloading %s to %s", context.url, context.archive)
+    write_file(context.archive, download(context.url), true)
   end
-  return unpack_archive(paths.archive)
+  unpack_archive(context)
+  return context
 end
 
 local function string_gsplit(string, pattern, capture) -- {{{2
@@ -268,8 +270,11 @@ end
 
 local function run_build(project, directory, command) -- {{{2
   message("Building %s ..", project)
-  local batch_commands = string.format('CALL "%s" /x86 /release\nCD %s\n%s',
-      sdk_setenv_tool, directory, command)
+  local batch_commands = string.format([[
+    @CALL "%s" /x86 /release >NUL 2>&1
+    @CD %s
+    %s
+  ]], sdk_setenv_tool, directory, command)
   local batch_file = os.tmpname() .. '.cmd'
   write_file(batch_file, batch_commands, false)
   local shell = assert(apr.proc_create 'cmd')
@@ -279,14 +284,11 @@ local function run_build(project, directory, command) -- {{{2
   return function()
     assert(shell:wait(true))
     os.remove(batch_file)
+    message("Finished %s build!", project)
   end
 end
 
 -- Build instructions for specific projects. {{{1
-
-local function archive_from_url(url, file)
-  return { url = url, file = (file or apr.filepath_name(url)):lower() }
-end
 
 local function auto_create_dir(path, parent)
   if parent then
@@ -338,10 +340,9 @@ local function copy_files(sourcedir, targetdir, files)
   end
 end
 
-local function copy_lua_files(builddir) -- {{{2
+local function copy_lua_files(context) -- {{{2
   -- This handles Lua 5.1, LuaJIT 1 and LuaJIT 2.
-  local paths = filepaths(builddir)
-  copy_files(paths.build, paths.binaries, [[
+  copy_files(context.build, context.binaries, [[
     COPYRIGHT -> COPYRIGHT.txt
     HISTORY -> HISTORY.txt
     INSTALL -> INSTALL.txt
@@ -377,15 +378,17 @@ local function find_lua_release() -- {{{3
     local url = 'http://www.lua.org/ftp/' .. archive
     table.insert(releases, url)
   end
-  return archive_from_url(table.remove(version_sort(releases, true)))
+  assert(#releases >= 1, "Failed to find any Lua releases!")
+  local sorted_releases = version_sort(releases, true)
+  local latest_release = table.remove(sorted_releases)
+  return context_from_url(latest_release)
 end
 
-local function build_lua(builddir) -- {{{3
-  local release = apr.filepath_name(builddir)
-  local wait_for_build = run_build(release, builddir, [[CALL etc\luavs.bat]])
+local function build_lua(context) -- {{{3
+  local wait_for_build = run_build(context.release, context.build, [[CALL etc\luavs.bat]])
   return function()
     wait_for_build()
-    copy_lua_files(builddir)
+    copy_lua_files(context)
   end
 end
 
@@ -407,24 +410,22 @@ local function find_luajit_releases() -- {{{3
   end
   local lj1_latest = table.remove(version_sort(lj1_releases, true))
   local lj2_latest = table.remove(version_sort(lj2_releases, true))
-  return archive_from_url(lj1_latest), archive_from_url(lj2_latest)
+  return context_from_url(lj1_latest), context_from_url(lj2_latest)
 end
 
-local function build_luajit1(builddir) -- {{{3
-  local release = apr.filepath_name(builddir)
-  local wait_for_build = run_build(release, builddir, 'etc\\luavs.bat')
+local function build_luajit1(context) -- {{{3
+  local wait_for_build = run_build(context.release, context.build, 'etc\\luavs.bat')
   return function()
     wait_for_build()
-    copy_lua_files(builddir)
+    copy_lua_files(context)
   end
 end
 
-local function build_luajit2(builddir) -- {{{3
-  local release = apr.filepath_name(builddir)
-  local wait_for_build = run_build(release, apr.filepath_merge(builddir, 'src'), 'msvcbuild.bat')
+local function build_luajit2(context) -- {{{3
+  local wait_for_build = run_build(context.release, apr.filepath_merge(context.build, 'src'), 'msvcbuild.bat')
   return function()
     wait_for_build()
-    copy_lua_files(builddir)
+    copy_lua_files(context)
   end
 end
 
@@ -436,22 +437,20 @@ local function find_lpeg_release()
   for target in page:gmatch '<[Aa]%s+[Hh][Rr][Ee][Ff]="(.-)"' do
     if target:find 'lpeg%-[0-9.]-%.tar%.gz$' then
       -- TODO Right now the LPeg homepage only contains a link to the latest release, still this is kind of a hack...
-      return archive_from_url(absolute_url(target, url))
+      return context_from_url(absolute_url(target, url))
     end
   end
   error "Failed to find LPeg release online!"
 end
 
-local function build_lpeg(builddir, lua_paths)
-  local lpeg_paths = filepaths(builddir)
-  local release = apr.filepath_name(builddir)
+local function build_lpeg(lpeg_release, lua_release)
   -- Start the build using a custom command (LPeg doesn't come with a Windows makefile or batch script).
   local command = 'CL.EXE /nologo /I"%s/src" lpeg.c /link /dll /out:lpeg.dll /export:luaopen_lpeg "/libpath:%s/src" lua51.lib'
-  local wait_for_build = run_build(release, builddir, command:format(lua_paths.binaries, lua_paths.binaries))
+  local wait_for_build = run_build(lpeg_release.release, lpeg_release.build, command:format(lua_release.binaries, lua_release.binaries))
   return function()
     -- Wait for the build to finish and copy the resulting files.
     wait_for_build()
-    copy_files(lpeg_paths.build, lpeg_paths.binaries, [[
+    copy_files(lpeg_release.build, lpeg_release.binaries, [[
       HISTORY -> HISTORY.txt
       lpeg-128.gif -> doc/lpeg-128.gif
       lpeg.dll
@@ -479,18 +478,16 @@ local function find_luasocket_release()
   if #releases >= 1 then
     local latest_release = table.remove(version_sort(releases, true))
     local basename = apr.filepath_name(latest_release)
-    return archive_from_url(latest_release .. '/' .. basename .. '.tar.gz')
+    return context_from_url(latest_release .. '/' .. basename .. '.tar.gz')
   else
     error "Failed to find LuaSocket release online!"
   end
 end
 
-local function build_luasocket(builddir, lua_paths)
-  local luasocket_paths = filepaths(builddir)
-  local release = apr.filepath_name(builddir)
-  -- Start the build using a custom batch script (the LuaSocket distribution
-  -- is build using Visual Studio which I don't have installed -- this will
-  -- have to do for now).
+local function build_luasocket(luasocket_release, lua_release)
+  -- Start the build using a custom batch script (the msbuild stuff included
+  -- with LuaSocket doesn't work on my machine and I want the build bot to work
+  -- on unmodified releases).
   local command = [[
     CL.EXE /nologo /MD /D"WIN32" /D"LUASOCKET_EXPORTS" ^
       /D"LUASOCKET_API=__declspec(dllexport)" /D"LUASOCKET_DEBUG" ^
@@ -501,11 +498,12 @@ local function build_luasocket(builddir, lua_paths)
     CL.EXE /nologo /MD /D"WIN32" /I"%s/src" src/mime.c /link /dll /out:mime.dll "/libpath:%s/src" lua51.lib
     IF EXIST mime.dll.manifest MT -nologo -manifest mime.dll.manifest -outputresource:mime.dll;2
   ]]
-  local wait_for_build = run_build(release, builddir, command:format(lua_paths.binaries, lua_paths.binaries, lua_paths.binaries, lua_paths.binaries))
+  local wait_for_build = run_build(luasocket_release.release, luasocket_release.build,
+      command:format(lua_release.binaries, lua_release.binaries, lua_release.binaries, lua_release.binaries))
   return function()
     -- Wait for the build to finish and copy the resulting files.
     wait_for_build()
-    copy_files(luasocket_paths.build, luasocket_paths.binaries, [[
+    copy_files(luasocket_release.build, luasocket_release.binaries, [[
       README
       LICENSE
       doc
@@ -526,7 +524,61 @@ local function build_luasocket(builddir, lua_paths)
   end
 end
 
-local function clean() --- {{{1
+-- LuaFileSystem. {{{2
+
+local function find_tags_on_github(project)
+  local json = require 'json'
+  local url = 'http://github.com/api/v2/json/repos/show/' .. project .. '/tags'
+  local data = assert(download(url))
+  local response = assert(json.decode(data))
+  return assert(response.tags, "Unexpected GitHub API response!")
+end
+
+local function find_releases_on_github(project, sortkey)
+  local list, map = {}, {}
+  for tag, hash in pairs(find_tags_on_github(project)) do
+    local key = sortkey(tag)
+    if key then
+      table.insert(list, key)
+      map[key] = tag
+    end
+  end
+  version_sort(list, false)
+  for i, key in ipairs(list) do
+    list[i] = 'https://github.com/' .. project .. '/zipball/' .. map[key]
+  end
+  return list
+end
+
+local function find_luafilesystem_release()
+  local releases = find_releases_on_github('keplerproject/luafilesystem', function(tag)
+    -- For some reason all but the most recent tags of LuaFileSystem have
+    -- underscores instead of dots to delimit the digits in the version number
+    -- and of course this completely breaks the version sort :-(
+    return (tag:find '^v' and tag:gsub('_', '.'))
+  end)
+  assert(#releases >= 1, "Failed to find any releases of LuaFileSystem!")
+  local url = table.remove(releases)
+  local version = apr.filepath_name(url):gsub('^v', '')
+  return context_from_url(url, 'luafilesystem-' .. version .. '.zip')
+end
+
+local function build_luafilesystem(lfs_release, lua_release)
+  local command = 'CL.EXE /nologo /I"%s/src" src/lfs.c /link /dll /out:lfs.dll /export:luaopen_lfs "/libpath:%s/src" lua51.lib'
+  local wait_for_build = run_build(lfs_release.release, lfs_release.build, command:format(lua_release.binaries, lua_release.binaries))
+  return function()
+    -- Wait for the build to finish and copy the resulting files.
+    wait_for_build()
+    copy_files(lfs_release.build, lfs_release.binaries, [[
+      README
+      doc
+      tests
+      lfs.dll
+    ]])
+  end
+end
+
+local function clean() -- {{{1
   apr.dir_remove_recursive(builds)
   apr.dir_remove_recursive(binaries)
   apr.dir_make(archives)
@@ -543,8 +595,10 @@ local function main() -- {{{1
 
     -- Run build bot in dedicated, headless Windows XP virtual machine.
     write_file(buildlog, '', false)
-    os.execute('tail -fn0 ' .. buildlog .. ' &')
-    assert(os.execute "VBoxHeadless -startvm 'Lua build bot'" == 0)
+    os.execute('(tail -fn0 ' .. buildlog .. ' 2>/dev/null | cat -s) &')
+    message "Booting headless Windows VM to run the build bot, this might take a while .."
+    assert(os.execute "VBoxHeadless -startvm 'Lua build bot' >/dev/null" == 0,
+        "Failed to start VirtualBox! Is the VM already running?")
 
     -- Check that the expected files were created.
     local files = {
@@ -560,26 +614,26 @@ local function main() -- {{{1
         'lua-5.1.4/src/lualib.h',
       }},
       { 'LuaJIT 1.1.7', {
-        'LuaJIT-1.1.7/etc/lua.hpp',
-        'LuaJIT-1.1.7/lua51.dll',
-        'LuaJIT-1.1.7/luajit.exe',
-        'LuaJIT-1.1.7/jit/opt.lua',
-        'LuaJIT-1.1.7/src/lauxlib.h',
-        'LuaJIT-1.1.7/src/lua.h',
-        'LuaJIT-1.1.7/src/lua51.lib',
-        'LuaJIT-1.1.7/src/luaconf.h',
-        'LuaJIT-1.1.7/src/lualib.h',
+        'luajit-1.1.7/etc/lua.hpp',
+        'luajit-1.1.7/lua51.dll',
+        'luajit-1.1.7/luajit.exe',
+        'luajit-1.1.7/jit/opt.lua',
+        'luajit-1.1.7/src/lauxlib.h',
+        'luajit-1.1.7/src/lua.h',
+        'luajit-1.1.7/src/lua51.lib',
+        'luajit-1.1.7/src/luaconf.h',
+        'luajit-1.1.7/src/lualib.h',
       }},
       { 'LuaJIT 2.0.0-beta8', {
-        'LuaJIT-2.0.0-beta8/etc/lua.hpp',
-        'LuaJIT-2.0.0-beta8/lua51.dll',
-        'LuaJIT-2.0.0-beta8/luajit.exe',
-        'LuaJIT-2.0.0-beta8/jit/dis_x86.lua',
-        'LuaJIT-2.0.0-beta8/src/lauxlib.h',
-        'LuaJIT-2.0.0-beta8/src/lua.h',
-        'LuaJIT-2.0.0-beta8/src/lua51.lib',
-        'LuaJIT-2.0.0-beta8/src/luaconf.h',
-        'LuaJIT-2.0.0-beta8/src/lualib.h',
+        'luajit-2.0.0-beta8/etc/lua.hpp',
+        'luajit-2.0.0-beta8/lua51.dll',
+        'luajit-2.0.0-beta8/luajit.exe',
+        'luajit-2.0.0-beta8/jit/dis_x86.lua',
+        'luajit-2.0.0-beta8/src/lauxlib.h',
+        'luajit-2.0.0-beta8/src/lua.h',
+        'luajit-2.0.0-beta8/src/lua51.lib',
+        'luajit-2.0.0-beta8/src/luaconf.h',
+        'luajit-2.0.0-beta8/src/lualib.h',
       }},
       { 'LPeg 0.10.2', {
         'lpeg-0.10.2/lpeg.dll',
@@ -632,8 +686,7 @@ local function main() -- {{{1
 
     -- Build the most recent release of the Lua reference implementation.
     local lua_release = find_lua_release()
-    local lua_builddir = download_archive(lua_release)
-    local wait_for_lua = build_lua(lua_builddir)
+    local wait_for_lua = build_lua(download_archive(lua_release))
 
     -- Build the most recent releases of LuaJIT 1 and 2.
     local lj1_release, lj2_release = find_luajit_releases()
@@ -646,13 +699,15 @@ local function main() -- {{{1
 
     -- Build the most recent release of LPeg.
     local lpeg_release = find_lpeg_release()
-    local lpeg_builddir = download_archive(lpeg_release)
-    table.insert(children, build_lpeg(lpeg_builddir, filepaths(lua_release.url)))
+    table.insert(children, build_lpeg(download_archive(lpeg_release), lua_release))
 
     -- Build the most recent release of LuaSocket.
     local luasocket_release = find_luasocket_release()
-    local luasocket_builddir = download_archive(luasocket_release)
-    table.insert(children, build_luasocket(luasocket_builddir, filepaths(lua_release.url)))
+    table.insert(children, build_luasocket(download_archive(luasocket_release), lua_release))
+
+    -- Build the most recent release of LuaFileSystem.
+    local lfs_release = find_luafilesystem_release()
+    table.insert(children, build_luafilesystem(download_archive(lfs_release), lua_release))
 
     -- Wait for all builds to finish.
     for i = 1, #children do children[i]() end
