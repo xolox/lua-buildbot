@@ -21,7 +21,6 @@
 
  TODO Add a command line interface
  TODO Decouple checking for updates from building, this way we can check for updates on UNIX and never even bother booting the VM?
- TODO Include cryptographic hashes of generated binaries in README?
  TODO Extract project specific instructions into separate files?
 
 ]]
