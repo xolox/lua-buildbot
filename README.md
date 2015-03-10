@@ -6,6 +6,48 @@ Lots of [Lua](http://lua.org/) projects (including Lua itself and [LuaJIT](http:
  * I don't actually have any Windows machines and don't feel like setting one up just for this build bot
  * I want to be able to run the build bot from a cron job so it can automatically build all projects once a week
 
+## Status
+
+### Project discontinued
+
+I'm sorry to say that this project has been discontinued. My reasons for this are as follows (the below points are my opinions, I don't necessarily expect anyone to agree with them):
+
+ * **I stopped using Windows, in fact I abandoned the complete Microsoft software stack**
+
+   * One reason for this is that I consider the Microsoft stack very unfriendly to developers who are (like me) oriented toward command line automation.
+
+   * Another reason is the fact that quite a few of Microsoft's build tools are commercially licensed and have restrictions on redistribution of software built using them.
+
+   * I switched away from Microsoft Windows for personal use years ago and paying for a new license with every Microsoft Windows release just to keep this Lua build bot running feels absurd to me.
+
+   * As a more general point, I don't like where the development of Microsoft and Windows have been heading in the past couple of years.
+
+ * **I more or less stopped using Lua for personal projects :-(**
+
+   * When I originally fell in love with Lua the language I quickly got frustrated by the surrounding ecosystem because I wanted to use Lua as a general purpose language (admittedly not its original purpose).
+
+     * Out of frustration I started working on [Lua/APR] [lua_apr] to provide myself with a more generally useful "standard library" of operating system interfaces.
+
+     * When I started developing Lua/APR I seriously underestimated my knowledge of [low level systems programming] [c], this is why it took me years to get the project to a state where I could be proud of it.
+
+     * In the end I did get quite far with Lua/APR, eventually presenting it at the [Lua Workshop 2011] [workshop] and having it [included in Debian] [debian].
+
+   * Having Lua/APR available for operating system interfacing was nice, but what I really wanted from my favorite programming language was a rich ecosystem of bindings and packages. Even after creating Lua/APR I still regularly fell into the trap of wanting and not finding bindings to shared libraries. Creating such bindings for every project you want to work on quickly gets tiresome.
+
+   * Starting from 2011 I got a full time job working as a software engineer and later system administrator (DevOps) working on Python projects and this slowly but surely pulled me away from the world of Lua. If you look at [my GitHub profile] [github_profile] now (in 2015) you'll see what I mean :-).
+
+For now, given this extensive explanation, I will keep the repository online, maybe it can serve as inspiration to others. Or who knows, maybe I'll find a way to run Windows legally without paying for licenses and I can find a way to revive the build bot (no promises though). I still love Lua the language, so there's one thing :-).
+
+### To-do list
+
+The following stuff has not yet been implemented but is on the to-do list:
+
+ * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
+ * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
+ * **Use LuaRocks to build Lua modules**: currently the build bot uses custom batch scripts to build Lua modules, but of course a generic solution is preferable!
+    * While adding support for the LuaSocket module I was curious enough to try if `luarocks install luasocket` would work in my environment but it doesn't; `msbuild` complains that the project files are incompatible
+ * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
+
 ## Downloads
 
 The following packages have been built by the Lua build bot:
@@ -27,16 +69,6 @@ The following packages have been built by the Lua build bot:
  <tr><td><a href="http://peterodding.com/code/lua/buildbot/downloads/luasocket-2.0.2.zip">LuaSocket 2.0.2</a></td><td>126K</td><td><code>a6a8fe0763cd21160c4cde2f6da8df5095851c36</code></td></tr>
  <tr><td><a href="http://peterodding.com/code/lua/buildbot/downloads/luafilesystem-1.5.0.zip">LuaFileSystem 1.5.0</a></td><td>70K</td><td><code>9c482f761d4e7624215b62e0b807a59ff44a3309</code></td></tr>
 </table>
-
-## Status
-
-The following stuff has not yet been implemented but is on the to-do list:
-
- * Make the build bot **test the binaries** using a test suite of some sort; if everything is going to be automated I have to know that the binaries I'm publishing actually work
- * Deploy the build bot and virtual machine to one of my servers and **run the build bot from a daily cron job**?
- * **Use LuaRocks to build Lua modules**: currently the build bot uses custom batch scripts to build Lua modules, but of course a generic solution is preferable!
-    * While adding support for the LuaSocket module I was curious enough to try if `luarocks install luasocket` would work in my environment but it doesn't; `msbuild` complains that the project files are incompatible
- * **Support for Mac binaries?** This requires someone to run the build bot periodically on their Mac, because I don't have access to any Mac machines
 
 ## How it works
 
@@ -84,3 +116,9 @@ This software is licensed under the [MIT license](http://en.wikipedia.org/wiki/M
  * This license only applies to the build bot itself -- I don't have any affiliation with the projects supported by the build bot, I'm just a happy user
  * Should the original authors have objections against this build bot, let me know and I will remove support for the project in question
  * I don't give any guarantees as to the published binaries. They're generated in a dedicated machine so it's very unlikely that a virus could sneak in, but you never know until you've [scanned the binaries yourself](http://www.virustotal.com/)...
+
+[c]: http://en.wikipedia.org/wiki/C_(programming_language)
+[debian]: https://packages.debian.org/lua-apr
+[github_profile]: https://github.com/xolox/
+[lua_apr]: https://github.com/xolox/lua-apr
+[workshop]: http://www.lua.org/wshop11/Lua-APR.pdf
